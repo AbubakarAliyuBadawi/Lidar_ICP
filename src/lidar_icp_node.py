@@ -21,7 +21,7 @@ class LidarICPNode:
         self.cumulative_transform = np.identity(4)
         self.accumulated_points = []
         self.callback_count = 0
-        rospy.loginfo("Lidar ICP Node Initialized - Publishing reverse transform (os_sensor -> t0_static_frame)")
+        rospy.loginfo("Lidar ICP Node Initialized - Publishing transform (t0_static_frame -> os_sensor)")
 
     def print_transform_info(self, transform_matrix, description):
         """Print detailed information about a transformation matrix."""
@@ -92,16 +92,16 @@ class LidarICPNode:
             self.accumulated_points = points_list.copy()
             
             header = Header()
-            header.stamp = rospy.Time.now()
+            header.stamp = data.header.stamp  # Use timestamp from input message
             header.frame_id = self.static_frame
             t0_cloud_msg = pc2.create_cloud_xyz32(header, self.accumulated_points)
             self.pub_aligned.publish(t0_cloud_msg)
             
-            # Publishing initial transform in reverse direction
+            # Publishing initial transform
             t = tf2_ros.TransformStamped()
-            t.header.stamp = rospy.Time.now()
-            t.header.frame_id = data.header.frame_id  # os_sensor is now the parent frame
-            t.child_frame_id = self.static_frame      # t0_static_frame is now the child frame
+            t.header.stamp = data.header.stamp  # Use timestamp from input message
+            t.header.frame_id = self.static_frame  # t0_static_frame is now the parent frame
+            t.child_frame_id = data.header.frame_id  # os_sensor is now the child frame
             
             # Identity transform
             t.transform.translation.x = 0.0
@@ -113,7 +113,7 @@ class LidarICPNode:
             t.transform.rotation.z = 0.0
             
             self.tf_broadcaster.sendTransform(t)
-            rospy.loginfo(f"Stored t0 cloud and published initial TF: {data.header.frame_id} -> {self.static_frame}")
+            rospy.loginfo(f"Stored t0 cloud and published initial TF: {self.static_frame} -> {data.header.frame_id}")
             return
 
         # Perform ICP
@@ -131,10 +131,13 @@ class LidarICPNode:
             # Update cumulative transform
             self.cumulative_transform = np.dot(self.cumulative_transform, transf)
             
-            self.print_transform_info(self.cumulative_transform, "Updated Cumulative Transform")
+            # Calculate inverse transform for visualization in t0_fixed frame
+            inverse_transform = np.linalg.inv(self.cumulative_transform)
             
-            # Transform current cloud
-            transformed_cloud = self.transform_cloud(current_cloud_filtered, self.cumulative_transform)
+            self.print_transform_info(inverse_transform, "Inverse Transform for Visualization")
+            
+            # Transform current cloud using inverse transform
+            transformed_cloud = self.transform_cloud(current_cloud_filtered, inverse_transform)
             transformed_points = transformed_cloud.to_array().tolist()
             
             # Add transformed points
@@ -143,23 +146,23 @@ class LidarICPNode:
             
             # Publish accumulated cloud
             header = Header()
-            header.stamp = rospy.Time.now()
+            header.stamp = data.header.stamp  # Use timestamp from input message
             header.frame_id = self.static_frame
             accumulated_cloud_msg = pc2.create_cloud_xyz32(header, self.accumulated_points)
             self.pub_aligned.publish(accumulated_cloud_msg)
             
-            # Publish TF in reverse direction
+            # Publish TF
             t = tf2_ros.TransformStamped()
-            t.header.stamp = rospy.Time.now()
-            t.header.frame_id = data.header.frame_id  # os_sensor is now the parent frame
-            t.child_frame_id = self.static_frame      # t0_static_frame is now the child frame
+            t.header.stamp = data.header.stamp  # Use timestamp from input message
+            t.header.frame_id = self.static_frame  # t0_static_frame is now the parent frame
+            t.child_frame_id = data.header.frame_id  # os_sensor is now the child frame
             
-            # Use cumulative transform directly (no inversion needed)
-            t.transform.translation.x = self.cumulative_transform[0, 3]
-            t.transform.translation.y = self.cumulative_transform[1, 3]
-            t.transform.translation.z = self.cumulative_transform[2, 3]
+            # Use inverse transform for correct visualization
+            t.transform.translation.x = inverse_transform[0, 3]
+            t.transform.translation.y = inverse_transform[1, 3]
+            t.transform.translation.z = inverse_transform[2, 3]
             
-            quat = tf.transformations.quaternion_from_matrix(self.cumulative_transform)
+            quat = tf.transformations.quaternion_from_matrix(inverse_transform)
             t.transform.rotation.x = quat[0]
             t.transform.rotation.y = quat[1]
             t.transform.rotation.z = quat[2]
@@ -167,7 +170,7 @@ class LidarICPNode:
             
             self.tf_broadcaster.sendTransform(t)
             rospy.loginfo("\nTransform Broadcasting:")
-            rospy.loginfo(f"Published TF: {data.header.frame_id} -> {self.static_frame}")
+            rospy.loginfo(f"Published TF: {self.static_frame} -> {data.header.frame_id}")
             rospy.loginfo(f"Translation: [{t.transform.translation.x:.6f}, {t.transform.translation.y:.6f}, {t.transform.translation.z:.6f}]")
             rospy.loginfo(f"Rotation (quaternion): [{t.transform.rotation.x:.6f}, {t.transform.rotation.y:.6f}, {t.transform.rotation.z:.6f}, {t.transform.rotation.w:.6f}]")
             rospy.loginfo(f"Total accumulated points: {len(self.accumulated_points)}")
