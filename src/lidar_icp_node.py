@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 
+"""
+ROS node for performing Iterative Closest Point (ICP) alignment on LiDAR point clouds.
+This node subscribes to incoming point cloud data, performs ICP registration with previous frames,
+and publishes the aligned point clouds along with their transformations.
+
+The node includes functionality for:
+- Point cloud filtering and downsampling
+- ICP-based registration between consecutive frames
+- Transform validation to detect unrealistic movements
+- Publishing aligned point clouds and transforms to the ROS ecosystem
+"""
+
 import rospy
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs.point_cloud2 as pc2
@@ -11,7 +23,19 @@ from std_msgs.msg import Header
 from geometry_msgs.msg import TransformStamped
 
 class LidarICPNode:
+    """
+    A ROS node that performs real-time point cloud alignment using ICP algorithm.
+    
+    This class handles the continuous processing of incoming LiDAR point clouds,
+    maintaining their spatial relationships, and publishing the results to the ROS network.
+    It includes various parameters for tuning the ICP process and filtering steps.
+    """
+
     def __init__(self):
+        """
+        Initialize the LidarICPNode with configuration parameters and ROS setup.
+        Sets up subscribers, publishers, and transform broadcasters.
+        """
         rospy.init_node('LidarICPNode', anonymous=True)
         
         # ICP (Iterative Closest Point) Parameters
@@ -34,16 +58,24 @@ class LidarICPNode:
         
         # TF handling
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
-        self.fixed_frame = "map"  # Changed from t0_static_frame to map
+        self.fixed_frame = "map"  # Global fixed frame for alignment
         
         # State variables
-        self.previous_cloud = None
-        self.cumulative_transform = np.identity(4)
-        self.accumulated_points = []
-        self.callback_count = 0
+        self.previous_cloud = None              # Store previous frame for ICP alignment
+        self.cumulative_transform = np.identity(4)  # Accumulated transform from initial frame
+        self.accumulated_points = []            # List of all aligned points in fixed frame
+        self.callback_count = 0                 # Counter for processed frames
 
     def filter_cloud(self, cloud_pcl):
-        """Apply filtering to input point cloud."""
+        """
+        Apply filtering operations to input point cloud to improve quality and reduce computation time.
+        
+        Args:
+            cloud_pcl (pcl.PointCloud): Input point cloud to be filtered
+            
+        Returns:
+            pcl.PointCloud: Filtered point cloud
+        """
         # Voxel Grid filter for downsampling
         vg = cloud_pcl.make_voxel_grid_filter()
         vg.set_leaf_size(self.leaf_size, self.leaf_size, self.leaf_size)
@@ -51,14 +83,22 @@ class LidarICPNode:
         
         # Statistical Outlier Removal with adjusted parameters
         sor = filtered.make_statistical_outlier_filter()
-        sor.set_mean_k(30)  # Reduced from 50
-        sor.set_std_dev_mul_thresh(2.0)  # Increased from 1.0
+        sor.set_mean_k(30)  # Number of neighbors to analyze for each point
+        sor.set_std_dev_mul_thresh(2.0)  # Standard deviation threshold for outlier removal
         filtered = sor.filter()
         
         return filtered
 
     def check_transform_validity(self, transform):
-        """Check if the transformation is within acceptable limits."""
+        """
+        Verify if the calculated transformation is physically realistic.
+        
+        Args:
+            transform (np.array): 4x4 transformation matrix to be validated
+            
+        Returns:
+            tuple: (bool, str) indicating if transform is valid and explanation message
+        """
         # Check translation magnitude
         translation = transform[:3, 3]
         translation_magnitude = np.linalg.norm(translation)
@@ -75,7 +115,16 @@ class LidarICPNode:
         return True, "Transform within limits"
 
     def perform_icp(self, source_cloud, target_cloud):
-        """Perform ICP with error checking."""
+        """
+        Execute ICP alignment between two point clouds with error checking.
+        
+        Args:
+            source_cloud (pcl.PointCloud): Point cloud to be aligned
+            target_cloud (pcl.PointCloud): Reference point cloud
+            
+        Returns:
+            tuple: (success_bool, transformation_matrix, status_message)
+        """
         # Create ICP object
         icp = source_cloud.make_IterativeClosestPoint()
         
@@ -104,7 +153,16 @@ class LidarICPNode:
         return True, transf, f"Success with fitness: {fitness}"
 
     def transform_cloud(self, cloud_pcl, transform):
-        """Transform point cloud using transformation matrix."""
+        """
+        Apply transformation matrix to point cloud.
+        
+        Args:
+            cloud_pcl (pcl.PointCloud): Point cloud to transform
+            transform (np.array): 4x4 transformation matrix
+            
+        Returns:
+            pcl.PointCloud: Transformed point cloud
+        """
         points = np.asarray(cloud_pcl)
         transformed_points = []
         
@@ -118,7 +176,14 @@ class LidarICPNode:
         return transformed_cloud
 
     def publish_transform(self, transform, timestamp, child_frame):
-        """Publish transform to TF tree."""
+        """
+        Publish transformation to ROS TF tree.
+        
+        Args:
+            transform (np.array): 4x4 transformation matrix
+            timestamp (rospy.Time): Timestamp for the transform
+            child_frame (str): Name of the child frame in the transform
+        """
         t = TransformStamped()
         t.header.stamp = timestamp
         t.header.frame_id = self.fixed_frame
@@ -137,7 +202,18 @@ class LidarICPNode:
         self.tf_broadcaster.sendTransform(t)
 
     def callback(self, data):
-        """Main callback for processing incoming point clouds."""
+        """
+        Main callback function for processing incoming point cloud messages.
+        
+        This function handles the core logic of the node:
+        1. Converts ROS message to PCL format
+        2. Filters and preprocesses the point cloud
+        3. Performs ICP alignment with previous frame
+        4. Updates and publishes transforms and aligned point clouds
+        
+        Args:
+            data (sensor_msgs.msg.PointCloud2): Incoming point cloud message
+        """
         self.callback_count += 1
         rospy.loginfo(f"\n------ Processing frame {self.callback_count} ------")
         
