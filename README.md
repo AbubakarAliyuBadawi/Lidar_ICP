@@ -1,6 +1,6 @@
 # Lidar ICP Node
 
-The `LidarICPNode` is a ROS 2 package designed to align LiDAR point clouds using the Iterative Closest Point (ICP) algorithm. The node subscribes to a LiDAR point cloud topic, performs point cloud alignment, and publishes the aligned point cloud along with the transformation between the reference and fixed frames. It also features point cloud filtering to improve the quality of the alignment.
+The `LidarICPNode` is a ROS1 and ROS2 package designed to align LiDAR point clouds using the Iterative Closest Point (ICP) algorithm. The node subscribes to a LiDAR point cloud topic, performs point cloud alignment, and publishes the aligned point cloud along with the transformation between the reference and fixed frames. It also features point cloud filtering to improve the quality of the alignment.
 
 ## Overview
 
